@@ -53,7 +53,7 @@ jobs:
           git push
 
       - id: build_page
-        name: Build index.html at root (prefer existing; fallback to README)
+        name: Build index.html at root (prefer existing; fallback to README) with highlighted code
         env:
           REPO_HTML_TITLE: ${{ github.repository }}
         run: |
@@ -63,8 +63,8 @@ jobs:
           if [ -f index.html ]; then
             echo "Keeping existing index.html (not regenerating)."
           elif [ -f README.md ]; then
-            echo "Generating index.html from README.md..."
-            pandoc README.md -f markdown -t html -s -o index.html --metadata title="$REPO_HTML_TITLE"
+            echo "Generating index.html from README.md with syntax highlighting..."
+            pandoc README.md -f markdown -t html -s               --highlight-style=tango               -o index.html               --metadata title="$REPO_HTML_TITLE"
             GENERATED=1
           else
             echo "No index.html or README.md found; writing minimal page."
@@ -72,12 +72,15 @@ jobs:
             GENERATED=1
           fi
 
-          # Ensure Arial font is applied
+          # Inject GitHub-like CSS for code blocks + base font (works whether <head> exists or not)
+          CSS_BLOCK='<style>body{font-family:Arial,Helvetica,sans-serif} h1,h2,h3,h4,h5,h6{font-family:Arial,Helvetica,sans-serif} pre code{display:block;padding:.75em;background:#f6f8fa;border-radius:6px;font-size:90%;overflow:auto} code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace}</style>'
           if grep -qi '</head>' index.html; then
-            sed -i 's|</head>|<style>body{font-family:Arial, Helvetica, sans-serif;} h1,h2,h3,h4,h5,h6{font-family:Arial, Helvetica, sans-serif;}</style></head>|' index.html
+            # insert CSS before closing head
+            sed -i "s#</head>#${CSS_BLOCK}</head>#I" index.html
           else
+            # wrap body with head to inject CSS
             TMP=$(mktemp)
-            printf '%s\n' '<!doctype html><html><head><meta charset="utf-8">' '<style>body{font-family:Arial, Helvetica, sans-serif;} h1,h2,h3,h4,h5,h6{font-family:Arial, Helvetica, sans-serif;}</style>' '</head><body>' > "$TMP"
+            printf '%s\n' '<!doctype html><html><head><meta charset="utf-8">' "${CSS_BLOCK}" '</head><body>' > "$TMP"
             cat index.html >> "$TMP"
             printf '%s\n' '</body></html>' >> "$TMP"
             mv "$TMP" index.html
