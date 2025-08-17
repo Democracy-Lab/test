@@ -111,18 +111,17 @@ jobs:
             mv "$TMP" index.html
           fi
 
-          # Insert sidebar + wrap body content with .content (safe replace)
-          # 1) After opening <body>, add sidebar + open .content
+          # Insert sidebar + wrap body content with .content (use a literal Unicode arrow to avoid & in awk replacement)
           awk -v home="$HOMELINK" 'BEGIN{IGNORECASE=1}
             {
               if (!done && match(tolower($0), /<body[^>]*>/)) {
-                sub(/<body[^>]*>/, "&\n<div class=\"sidebar\"><a href=\"" home "\" aria-label=\"Go to home\">&larr; Home</a></div>\n<div class=\"content\">");
+                sub(/<body[^>]*>/, "&\n<div class=\"sidebar\"><a href=\"" home "\" aria-label=\"Go to home\">← Home</a></div>\n<div class=\"content\">");
                 done=1
               }
               print
             }' index.html > index.html.tmp && mv index.html.tmp index.html
 
-          # 2) Before closing </body>, close .content if we opened it
+          # Close .content before </body> if we opened it
           if grep -qi '<div class="content">' index.html; then
             awk 'BEGIN{IGNORECASE=1} { sub(/<\/body>/, "</div></body>"); print }' index.html > index.html.tmp && mv index.html.tmp index.html
           fi
@@ -192,3 +191,4 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
