@@ -26,7 +26,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y pandoc jq
+          sudo apt-get install -y pandoc jq curl
 
       - id: ensure_license
         name: Ensure MIT License exists (and mark if created)
@@ -53,14 +53,14 @@ jobs:
           git push
 
       - id: build_page
-        name: Build index.html with custom template (no narrow body) + centered wide layout + sidebar
+        name: Build index.html with custom template + grid sidebar
         env:
           REPO_HTML_TITLE: ${{ github.repository }}
         run: |
           set -e
           GENERATED=0
 
-          # Create a minimal Pandoc template with no default CSS (prevents 36em body cap)
+          # Minimal Pandoc template (no default CSS)
           cat > pandoc_template.html <<'TPL'
           <!doctype html>
           <html>
@@ -84,7 +84,7 @@ jobs:
           if [ -f index.html ]; then
             echo "Keeping existing index.html (not regenerating)."
           elif [ -f README.md ]; then
-            echo "Generating index.html from README.md (custom template, no default CSS)..."
+            echo "Generating index.html from README.md..."
             pandoc README.md -f markdown -t html -s \
               --template=pandoc_template.html \
               -o index.html \
@@ -98,27 +98,41 @@ jobs:
 
           HOMELINK="https://democracy-lab.github.io/"
 
-          # Base styles and layout (no width caps on body)
+          # Styles: grid layout + "full-height" painted sidebar column
           CSS='<style>
-          /* Base */
-          html, body { width: 100%; max-width: none; margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }
+          html, body { width:100%; max-width:none; margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; color:#222; }
           h1, h2, h3, h4, h5, h6 { font-family: Arial, Helvetica, sans-serif; }
           pre code { display:block; padding:.75em; background:#f6f8fa; border-radius:6px; font-size:90%; overflow:auto; }
           code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
-          /* Layout */
-          .page { display:flex; align-items:flex-start; }
-          .sidebar { flex:0 0 220px; background:#f4f4f4; min-height:100vh; padding:20px; box-shadow:2px 0 5px rgba(0,0,0,0.06); position:sticky; top:0; max-height:100vh; overflow:auto; }
+          /* Page uses CSS Grid; paint the left column so the sidebar appears full-height */
+          .page {
+            display: grid;
+            grid-template-columns: 220px 1fr;
+            min-height: 100vh;
+            background: linear-gradient(to right, #f4f4f4 0, #f4f4f4 220px, transparent 220px);
+          }
+
+          .sidebar {
+            padding: 20px;
+            position: sticky;
+            top: 0;
+            height: 100vh;       /* sidebar content scrolls independently if long */
+            overflow: auto;
+          }
           .sidebar a { display:block; margin-bottom:10px; color:#0366d6; text-decoration:none; font-weight:600; }
           .sidebar a:hover { text-decoration:underline; }
 
-          .content { flex:1; display:flex; justify-content:center; width:100%; }
+          .content { width: 100%; }
           .container { width:100%; max-width: 1400px; margin: 0 auto; padding: 48px; }
 
+          /* Extras block spacing */
+          .extras { margin-top: 48px; }
+          .extras h2, .extras h3 { margin-top: 1.2em; }
+
           @media (max-width: 1000px) {
-            .page { display:block; }
-            .sidebar { position:static; min-height:auto; max-height:none; width:auto; box-shadow:none; }
-            .content { display:block; }
+            .page { display:block; background:none; }
+            .sidebar { position: static; height:auto; overflow:visible; padding:16px; background:#f4f4f4; }
             .container { max-width:100%; margin:0; padding:24px; }
           }
           </style>'
@@ -130,12 +144,12 @@ jobs:
           else
             TMP=$(mktemp)
             printf '%s\n' '<!doctype html><html><head><meta charset="utf-8">' "$CSS" '</head><body>' > "$TMP"
-            cat index.html >> "$TMP"
+            sed '1,/<body[^>]*>/d' index.html >> "$TMP" || true
             printf '%s\n' '</body></html>' >> "$TMP"
             mv "$TMP" index.html
           fi
 
-          # Add wrapper if not present
+          # Wrap body with grid + sidebar + content container (idempotent)
           if grep -qi '<div class="page"' index.html; then
             echo "Wrapper already present; skipping."
           else
@@ -148,12 +162,13 @@ jobs:
                 print
               }' index.html > index.html.tmp && mv index.html.tmp index.html
 
+            # Close container/main/page before </body>
             awk 'BEGIN{IGNORECASE=1} { sub(/<\/body>/, "</div></main></div></body>"); print }' index.html > index.html.tmp && mv index.html.tmp index.html
           fi
 
           echo "generated=$GENERATED" >> "$GITHUB_OUTPUT"
 
-      - name: Append License, Suggested Citation, BibTeX, and repo metadata
+      - name: Inject License/Citation/BibTeX block BELOW README content (inside container)
         if: steps.build_page.outputs.generated == '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -167,6 +182,7 @@ jobs:
           LAST_UPDATE=$(git log -1 --format=%cI || date -u +%Y-%m-%dT%H:%M:%SZ)
           YEAR=$(date -u -d "$LAST_UPDATE" +%Y 2>/dev/null || date -u +%Y)
 
+          # Gather human contributors
           logins=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/$REPO/contributors?per_page=100&anon=false" \
             | jq -r '.[] | select((.type // "") != "Bot") | select(.login != "ghost") | .login' | sort -fu)
@@ -193,14 +209,50 @@ jobs:
           fi
 
           bibtex="@misc{$REPO_NAME-$YEAR,
-          author = {$authors_bibtex},
-          title = {$REPO_NAME},
-          year = {$YEAR},
-          howpublished = {\\url{$REPO_URL}},
-          note = {Last updated: $LAST_UPDATE}
+            author = {$authors_bibtex},
+            title = {$REPO_NAME},
+            year = {$YEAR},
+            howpublished = {\\url{$REPO_URL}},
+            note = {Last updated: $LAST_UPDATE}
           }"
 
-          printf '%s\n' '' '<hr>' '<h2>License</h2>' '<p>This project is licensed under the <a href="LICENSE">MIT License</a>.</p>' '' '<h2>Suggested Citation</h2>' "<p>$citation_written</p>" '' '<h3>BibTeX</h3>' '<pre><code>' "$bibtex" '</code></pre>' '' '<h3>Repository</h3>' "<p><em>$REPO_NAME</em><br>" "<a href=\"$REPO_URL\">$REPO_URL</a><br>" "<strong>Last updated:</strong> $LAST_UPDATE</p>" >> index.html
+          # Build the extras HTML block
+          EXTRAS=$(cat <<'HTML'
+          <section class="extras">
+            <hr>
+            <h2>License</h2>
+            <p>This project is licensed under the <a href="LICENSE">MIT License</a>.</p>
+
+            <h2>Suggested Citation</h2>
+            <p>__CITATION_WRITTEN__</p>
+
+            <h3>BibTeX</h3>
+            <pre><code>__BIBTEX__</code></pre>
+
+            <h3>Repository</h3>
+            <p><em>__REPO_NAME__</em><br>
+            <a href="__REPO_URL__">__REPO_URL__</a><br>
+            <strong>Last updated:</strong> __LAST_UPDATE__</p>
+          </section>
+          HTML
+          )
+
+          EXTRAS=${EXTRAS/__CITATION_WRITTEN__/$citation_written}
+          EXTRAS=${EXTRAS/__BIBTEX__/$(printf "%s" "$bibtex" | sed 's/[&/\]/\\&/g')}
+          EXTRAS=${EXTRAS/__REPO_NAME__/$REPO_NAME}
+          EXTRAS=${EXTRAS/__REPO_URL__/$REPO_URL}
+          EXTRAS=${EXTRAS/__LAST_UPDATE__/$LAST_UPDATE}
+
+          # Inject JUST BEFORE the wrapper closes: </div></main></div></body>
+          awk -v block="$EXTRAS" 'BEGIN{IGNORECASE=1}
+            {
+              line=$0
+              if (!done && match(tolower(line), /<\/div>\s*<\/main>\s*<\/div>\s*<\/body>/)) {
+                sub(/<\/div>\s*<\/main>\s*<\/div>\s*<\/body>/, block"</div></main></div></body>")
+                done=1
+              }
+              print
+            }' index.html > index.html.tmp && mv index.html.tmp index.html
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
@@ -216,4 +268,5 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
 
