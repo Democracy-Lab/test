@@ -53,7 +53,7 @@ jobs:
           git push
 
       - id: build_page
-        name: Build index.html at root (prefer existing; fallback to README) with highlighted code + sidebar
+        name: Build index.html (prefer existing; fallback to README) + inject styles and centered sidebar layout
         env:
           REPO_HTML_TITLE: ${{ github.repository }}
         run: |
@@ -75,27 +75,47 @@ jobs:
             GENERATED=1
           fi
 
-          # Inject CSS (GitHub-like code blocks + base font)
-          CSS_BLOCK='<style>body{font-family:Arial,Helvetica,sans-serif} h1,h2,h3,h4,h5,h6{font-family:Arial,Helvetica,sans-serif} pre code{display:block;padding:.75em;background:#f6f8fa;border-radius:6px;font-size:90%;overflow:auto} code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}</style>'
+          # Force homepage to the org root
+          HOMELINK="https://democracy-lab.github.io/"
+
+          # Base styles (GitHub-like code + fonts)
+          BASE_CSS='<style>
+          body{margin:0;font-family:Arial,Helvetica,sans-serif}
+          h1,h2,h3,h4,h5,h6{font-family:Arial,Helvetica,sans-serif}
+          pre code{display:block;padding:.75em;background:#f6f8fa;border-radius:6px;font-size:90%;overflow:auto}
+          code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+          </style>'
+
+          # Centered layout with a left sidebar using flexbox
+          LAYOUT_CSS='<style>
+          /* Flex container: sidebar + content */
+          body{display:flex;align-items:flex-start}
+          .sidebar{flex:0 0 220px;background:#f4f4f4;min-height:100vh;padding:20px;box-shadow:2px 0 5px rgba(0,0,0,0.06);position:sticky;top:0;max-height:100vh;overflow:auto}
+          .sidebar a{display:block;margin-bottom:10px;color:#0366d6;text-decoration:none;font-weight:600}
+          .sidebar a:hover{text-decoration:underline}
+          .content{flex:1;padding:24px;max-width:1100px;margin:0 auto} /* centered within remaining space */
+          /* Responsive: stack on small screens */
+          @media (max-width: 800px){
+            body{display:block}
+            .sidebar{position:static;min-height:auto;max-height:none;width:auto;box-shadow:none}
+            .content{max-width:100%;margin:0}
+          }
+          </style>'
+
+          # Inject CSS blocks into <head> (or wrap file if missing)
           if grep -qi '</head>' index.html; then
-            awk -v css="$CSS_BLOCK" 'BEGIN{IGNORECASE=1} { if (!done && match(tolower($0), /<\/head>/)) { sub(/<\/head>/, css"</head>"); done=1 } print }' index.html > index.html.tmp
+            awk -v css1="$BASE_CSS" -v css2="$LAYOUT_CSS" 'BEGIN{IGNORECASE=1} { if (!done && match(tolower($0), /<\/head>/)) { sub(/<\/head>/, css1 css2 "</head>"); done=1 } print }' index.html > index.html.tmp
             mv index.html.tmp index.html
           else
             TMP=$(mktemp)
-            printf '%s\n' '<!doctype html><html><head><meta charset="utf-8">' "${CSS_BLOCK}" '</head><body>' > "$TMP"
+            printf '%s\n' '<!doctype html><html><head><meta charset="utf-8">' "${BASE_CSS}${LAYOUT_CSS}" '</head><body>' > "$TMP"
             cat index.html >> "$TMP"
             printf '%s\n' '</body></html>' >> "$TMP"
             mv "$TMP" index.html
           fi
 
-          # Add a simple left sidebar that always links to the org root home
-          # Use a literal arrow "←" (not &larr;) to avoid escaping issues
-          HOMELINK="https://democracy-lab.github.io/"
-          SIDEBAR_CSS='<style>.sidebar{width:220px;background:#f4f4f4;min-height:100vh;padding:20px;box-shadow:2px 0 5px rgba(0,0,0,0.06);position:fixed;top:0;left:0;z-index:1}.sidebar a{display:block;margin-bottom:10px;color:#0366d6;text-decoration:none;font-weight:600}.sidebar a:hover{text-decoration:underline}.content{margin-left:240px;padding:24px;max-width:1100px}@media (max-width: 800px){.sidebar{position:static;width:auto;min-height:auto;box-shadow:none}.content{margin-left:0}}</style>'
-          awk -v css="$SIDEBAR_CSS" 'BEGIN{IGNORECASE=1} { if (!done && match(tolower($0), /<\/head>/)) { sub(/<\/head>/, css"</head>"); done=1 } print }' index.html > index.html.tmp
-          mv index.html.tmp index.html
-
-          # Insert the sidebar container right after <body> and wrap content
+          # Insert sidebar + open content wrapper right after <body>
+          # Use literal arrow to avoid entity escaping issues
           awk -v home="$HOMELINK" 'BEGIN{IGNORECASE=1}
             {
               if (!done && match(tolower($0), /<body[^>]*>/)) {
@@ -105,7 +125,7 @@ jobs:
               print
             }' index.html > index.html.tmp && mv index.html.tmp index.html
 
-          # Close the content wrapper just before </body>
+          # Close content wrapper before </body>
           if grep -qi '<div class="content">' index.html; then
             awk 'BEGIN{IGNORECASE=1} { sub(/<\/body>/, "</div></body>"); print }' index.html > index.html.tmp && mv index.html.tmp index.html
           fi
