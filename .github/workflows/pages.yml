@@ -149,3 +149,33 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
 
+      - name: Update repo description and homepage with Pages URL
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -e
+          # Fetch current description (if any)
+          CURRENT_DESC=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$REPO" | jq -r '.description // ""')
+          # If it already contains the PAGE_URL, do nothing
+          if echo "$CURRENT_DESC" | grep -Fq "$PAGE_URL"; then
+            echo "Description already contains Pages URL — skipping update."
+            exit 0
+          fi
+          # Compose a new description with the link appended (preserve existing, trim to sensible length)
+          if [ -n "$CURRENT_DESC" ]; then
+            NEW_DESC="$CURRENT_DESC | Live site: $PAGE_URL"
+          else
+            NEW_DESC="Live site: $PAGE_URL"
+          fi
+          # Truncate to 140 chars (GitHub UI soft limit for description display) while keeping whole words
+          if [ ${#NEW_DESC} -gt 140 ]; then
+            NEW_DESC=$(echo "$NEW_DESC" | awk '{ s=$0; if (length(s)>140){ while(length(s)>137){ sub(/ [^ ]*$/, "", s) } s=s"..."} print s }')
+          fi
+          # Set both description and homepage (website) field
+          PAYLOAD=$(jq -n --arg desc "$NEW_DESC" --arg home "$PAGE_URL" '{description:$desc, homepage:$home}')
+          curl -s -X PATCH -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/json"             -d "$PAYLOAD" "https://api.github.com/repos/$REPO" > /dev/null
+          echo "Repository description and homepage updated to include: $PAGE_URL"
+
+
