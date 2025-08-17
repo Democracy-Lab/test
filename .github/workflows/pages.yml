@@ -53,7 +53,7 @@ jobs:
           git push
 
       - id: build_page
-        name: Build index.html (prefer existing; fallback to README) + centered sidebar layout (idempotent)
+        name: Build index.html (prefer existing; fallback to README) + stable centered sidebar layout
         env:
           REPO_HTML_TITLE: ${{ github.repository }}
         run: |
@@ -86,18 +86,17 @@ jobs:
           code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
           </style>'
 
-          # Centered layout: body is flex, then a "main" flex item containing an inner ".container" that centers
+          # Use a .page wrapper for flex (do NOT make <body> a flex container)
           LAYOUT_CSS='<style>
-          body{display:flex;align-items:flex-start}
+          .page{display:flex;align-items:flex-start}
           .sidebar{flex:0 0 220px;background:#f4f4f4;min-height:100vh;padding:20px;box-shadow:2px 0 5px rgba(0,0,0,0.06);position:sticky;top:0;max-height:100vh;overflow:auto}
           .sidebar a{display:block;margin-bottom:10px;color:#0366d6;text-decoration:none;font-weight:600}
           .sidebar a:hover{text-decoration:underline}
-          .main{flex:1;display:flex;min-width:0}
-          .container{width:100%;max-width:980px;margin:0 auto;padding:24px} /* centers content column */
+          .content{flex:1;width:100%}
+          .container{max-width:980px;margin:0 auto;padding:24px}
           @media (max-width: 800px){
-            body{display:block}
+            .page{display:block}
             .sidebar{position:static;min-height:auto;max-height:none;width:auto;box-shadow:none}
-            .main{display:block}
             .container{max-width:100%;margin:0}
           }
           </style>'
@@ -114,22 +113,23 @@ jobs:
             mv "$TMP" index.html
           fi
 
-          # Idempotent injection: only add sidebar/wrappers if not already present
-          if grep -qi '<div class="sidebar"' index.html; then
-            echo "Sidebar already present; skipping wrapper injection."
+          # Idempotent: only add wrapper if not present
+          if grep -qi '<div class="page"' index.html; then
+            echo "Wrapper already present; skipping."
           else
-            # Insert sidebar + open main/container right after <body>
+            # Wrap body content in .page/.content/.container and add sidebar
+            # 1) Insert opening wrapper right after <body>
             awk -v home="$HOMELINK" 'BEGIN{IGNORECASE=1}
               {
                 if (!done && match(tolower($0), /<body[^>]*>/)) {
-                  sub(/<body[^>]*>/, "&\n<div class=\"sidebar\"><a href=\"" home "\" aria-label=\"Go to home\">← Home</a></div>\n<main class=\"main\"><div class=\"container\">");
+                  sub(/<body[^>]*>/, "&\n<div class=\"page\"><aside class=\"sidebar\"><a href=\"" home "\" aria-label=\"Go to home\">← Home</a></aside>\n<main class=\"content\"><div class=\"container\">");
                   done=1
                 }
                 print
               }' index.html > index.html.tmp && mv index.html.tmp index.html
 
-            # Close wrappers before </body>
-            awk 'BEGIN{IGNORECASE=1} { sub(/<\/body>/, "</div></main></body>"); print }' index.html > index.html.tmp && mv index.html.tmp index.html
+            # 2) Close wrappers just before </body>
+            awk 'BEGIN{IGNORECASE=1} { sub(/<\/body>/, "</div></main></div></body>"); print }' index.html > index.html.tmp && mv index.html.tmp index.html
           fi
 
           echo "generated=$GENERATED" >> "$GITHUB_OUTPUT"
