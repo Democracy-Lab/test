@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Deploy to GitHub Pages (force-write repo URL with debug)
 
 on:
   push:
@@ -28,57 +28,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pandoc jq
 
-      - id: ensure_license
-        name: Ensure MIT License exists (and mark if created)
-        run: |
-          if [ ! -f LICENSE ]; then
-            YEAR=$(date +%Y)
-            printf '%s\n' "MIT License" "" "Copyright (c) $YEAR Steph Buongiorno" "" "Permission is hereby granted, free of charge, to any person obtaining a copy" "of this software and associated documentation files (the \"Software\"), to deal" "in the Software without restriction, including without limitation the rights" "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell" "copies of the Software, and to permit persons to whom the Software is" "furnished to do so, subject to the following conditions:" "" "The above copyright notice and this permission notice shall be included in all" "copies or substantial portions of the Software." "" "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR" "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY," "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE" "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER" "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM," "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE" "SOFTWARE." > LICENSE
-            echo "MIT License generated."
-            echo "created=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "LICENSE file already exists — skipping generation."
-            echo "created=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Commit LICENSE to repo (first time only)
-        if: steps.ensure_license.outputs.created == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add LICENSE
-          git commit -m "Add MIT LICENSE (auto-generated)"
-          git push
-
       - id: build_page
-        name: Build index.html at root (prefer existing; fallback to README) with highlighted code
+        name: Build index.html (keep existing, or README -> HTML)
         env:
           REPO_HTML_TITLE: ${{ github.repository }}
         run: |
-          set -e
-          GENERATED=0
-
+          set -euo pipefail
           if [ -f index.html ]; then
             echo "Keeping existing index.html (not regenerating)."
           elif [ -f README.md ]; then
-            echo "Generating index.html from README.md with syntax highlighting..."
-            pandoc README.md -f markdown -t html -s \
-              --highlight-style=tango \
-              -o index.html \
-              --metadata title="$REPO_HTML_TITLE"
-            GENERATED=1
+            pandoc README.md -f markdown -t html -s               --highlight-style=tango               -o index.html               --metadata title="$REPO_HTML_TITLE"
           else
-            echo "No index.html or README.md found; writing minimal page."
             printf '%s\n' '<!doctype html><html><head><meta charset="utf-8"><title>Site</title></head><body>' '<h1>Site</h1>' '<p>No README.md found. Add one and push to regenerate this page.</p>' '</body></html>' > index.html
-            GENERATED=1
           fi
 
-          # Inject CSS without sed (avoid escaping issues)
-          CSS_BLOCK='<style>body{font-family:Arial,Helvetica,sans-serif} h1,h2,h3,h4,h5,h6{font-family:Arial,Helvetica,sans-serif} pre code{display:block;padding:.75em;background:#f6f8fa;border-radius:6px;font-size:90%;overflow:auto} code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace}</style>'
+          # Minimal CSS injection
+          CSS_BLOCK='<style>body{font-family:Arial,Helvetica,sans-serif} pre code{display:block;padding:.75em;background:#f6f8fa;border-radius:6px;font-size:90%;overflow:auto}</style>'
           if grep -qi '</head>' index.html; then
-            awk -v css="$CSS_BLOCK" 'BEGIN{IGNORECASE=1} { if (!done && match(tolower($0), /<\/head>/)) { sub(/<\/head>/, css"</head>"); done=1 } print }' index.html > index.html.tmp
+            awk -v css="$CSS_BLOCK" 'BEGIN{IGNORECASE=1} { if (!done && match(tolower($0), /</head>/)) { sub(/</head>/, css"</head>"); done=1 } print }' index.html > index.html.tmp
             mv index.html.tmp index.html
           else
             TMP=$(mktemp)
@@ -88,34 +55,29 @@ jobs:
             mv "$TMP" index.html
           fi
 
-          echo "generated=$GENERATED" >> "$GITHUB_OUTPUT"
-
-      - name: Append License, Suggested Citation, BibTeX, and repo metadata
-        if: steps.build_page.outputs.generated == '1'
+      - name: Force-write License/Citation/BibTeX/Repository with URL + DEBUG
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          OWNER: ${{ github.repository_owner }}
         shell: bash
         run: |
           set -Eeuo pipefail
-
           REPO_NAME="${REPO#*/}"
           REPO_URL="https://github.com/$REPO"
           LAST_UPDATE=$(git log -1 --format=%cI || date -u +%Y-%m-%dT%H:%M:%SZ)
           YEAR=$(date -u -d "$LAST_UPDATE" +%Y 2>/dev/null || date -u +%Y)
 
-          logins=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
-            "https://api.github.com/repos/$REPO/contributors?per_page=100&anon=false" \
-            | jq -r '.[] | select((.type // "") != "Bot") | select(.login != "ghost") | .login' | sort -fu)
+          echo "DEBUG: REPO=$REPO"
+          echo "DEBUG: REPO_URL=$REPO_URL"
+          echo "DEBUG: LAST_UPDATE=$LAST_UPDATE"
+
+          logins=$(curl -s -H "Authorization: Bearer $GH_TOKEN"             "https://api.github.com/repos/$REPO/contributors?per_page=100&anon=false"             | jq -r '.[] | select((.type // "") != "Bot") | select(.login != "ghost") | .login' | sort -fu)
 
           names=""
           for u in $logins; do
             name=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/users/$u" | jq -r '.name // empty')
             [ -z "$name" ] && name="$u"
-            if [ "$name" != "Steph Buongiorno" ] && [ "$u" != "stephbuon" ]; then
-              names="$names\n$name"
-            fi
+            names="$names\n$name"
           done
           names_sorted=$(printf "%b" "$names" | awk 'NF' | sort -fu)
 
@@ -138,24 +100,31 @@ jobs:
           note = {Last updated: $LAST_UPDATE}
           }"
 
-          # Append blocks using a here-doc so variables are expanded by bash
+          # Remove any previous block entirely and append a fresh one
+          awk 'BEGIN{p=1} /<!-- BEGIN-REPO-META -->/{p=0} /<!-- END-REPO-META -->/{next} p{print}' index.html > index.clean.html || true
+          mv index.clean.html index.html || true
+
           cat >> index.html <<HTMLBLOCK
+          <!-- BEGIN-REPO-META -->
+          <hr>
+          <h2>License</h2>
+          <p>This project is licensed under the <a href="LICENSE">MIT License</a>.</p>
 
-<hr>
-<h2>License</h2>
-<p>This project is licensed under the <a href="LICENSE">MIT License</a>.</p>
+          <h2>Suggested Citation</h2>
+          <p>$citation_written</p>
 
-<h2>Suggested Citation</h2>
-<p>$citation_written</p>
+          <h3>BibTeX</h3>
+          <pre><code>$bibtex</code></pre>
 
-<h3>BibTeX</h3>
-<pre><code>$bibtex</code></pre>
+          <h3>Repository</h3>
+          <p><em>$REPO_NAME</em><br>
+          <a href="$REPO_URL">$REPO_URL</a><br>
+          <strong>Last updated:</strong> $LAST_UPDATE</p>
+          <!-- END-REPO-META -->
+          HTMLBLOCK
 
-<h3>Repository</h3>
-<p><em>$REPO_NAME</em><br>
-<a href="$REPO_URL">$REPO_URL</a><br>
-<strong>Last updated:</strong> $LAST_UPDATE</p>
-HTMLBLOCK
+          echo "---------- FINAL LINES OF index.html ----------"
+          tail -n 60 index.html
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
@@ -171,4 +140,3 @@ HTMLBLOCK
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
-
