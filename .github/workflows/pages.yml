@@ -34,28 +34,28 @@ jobs:
           if [ ! -f LICENSE ]; then
             YEAR=$(date +%Y)
             cat > LICENSE <<EOF
-            MIT License
+MIT License
 
-            Copyright (c) $YEAR Steph Buongiorno
+Copyright (c) ${YEAR} Steph Buongiorno
 
-            Permission is hereby granted, free of charge, to any person obtaining a copy
-            of this software and associated documentation files (the "Software"), to deal
-            in the Software without restriction, including without limitation the rights
-            to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-            copies of the Software, and to permit persons to whom the Software is
-            furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-            The above copyright notice and this permission notice shall be included in all
-            copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-            THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-            IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-            FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-            AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-            LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-            OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-            SOFTWARE.
-            EOF
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+EOF
             echo "MIT License generated."
             echo "created=true" >> "$GITHUB_OUTPUT"
           else
@@ -87,6 +87,7 @@ jobs:
           HOMELINK="https://democracy-lab.github.io/"
           REPO_URL="https://github.com/$OWNER/$REPO_NAME"
 
+          # Minimal Pandoc template
           cat > pandoc_template.html <<'TPL'
           <!doctype html>
           <html>
@@ -111,11 +112,18 @@ jobs:
             echo "Keeping existing index.html (not regenerating)."
           elif [ -f README.md ]; then
             echo "Generating index.html from README.md..."
-            pandoc README.md -f markdown -t html -s --template=pandoc_template.html -o index.html --metadata title="$REPO_HTML_TITLE"
+            pandoc README.md -f markdown -t html -s \
+              --template=pandoc_template.html \
+              -o index.html \
+              --metadata title="$REPO_HTML_TITLE"
             GENERATED=1
           else
             echo "No index.html or README.md found; writing minimal page."
-            printf '%s\n' '<!doctype html><html><head><meta charset="utf-8"><title>Site</title></head><body>' '<h1>Site</h1>' '<p>No README.md found. Add one and push to regenerate this page.</p>' '</body></html>' > index.html
+            printf '%s\n' \
+              '<!doctype html><html><head><meta charset="utf-8"><title>Site</title></head><body>' \
+              '<h1>Site</h1>' \
+              '<p>No README.md found. Add one and push to regenerate this page.</p>' \
+              '</body></html>' > index.html
             GENERATED=1
           fi
 
@@ -139,11 +147,13 @@ jobs:
           }
           </style>'
 
+          # Inject CSS into <head>
           if grep -qi '</head>' index.html; then
             awk -v css="$CSS" 'BEGIN{IGNORECASE=1} { if (!done && match(tolower($0), /<\/head>/)) { sub(/<\/head>/, css"</head>"); done=1 } print }' index.html > index.html.tmp
             mv index.html.tmp index.html
           fi
 
+          # Wrap with sidebar + container
           if grep -qi '<div class="page"' index.html; then
             echo "Wrapper already present; skipping."
           else
@@ -175,6 +185,7 @@ jobs:
           LAST_UPDATE=$(git log -1 --format=%cI || date -u +%Y-%m-%dT%H:%M:%SZ)
           YEAR=$(date -u -d "$LAST_UPDATE" +%Y 2>/dev/null || date -u +%Y)
 
+          # Gather human contributors
           logins=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/$REPO/contributors?per_page=100&anon=false" \
             | jq -r '.[] | select((.type // "") != "Bot") | select(.login != "ghost") | .login' | sort -fu)
@@ -258,5 +269,6 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
 
 
