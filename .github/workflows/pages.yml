@@ -53,12 +53,25 @@ jobs:
           git push
 
       - id: build_page
-        name: Build index.html with custom template + grid sidebar
+        name: Build index.html with custom template + grid sidebar (dynamic URLs)
         env:
           REPO_HTML_TITLE: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_FULL: ${{ github.repository }}   # owner/repo
         run: |
           set -e
           GENERATED=0
+
+          # === Compute dynamic URLs ===
+          REPO_NAME="${REPO_FULL#*/}"
+          REPO_URL="https://github.com/${REPO_FULL}"
+
+          # Pages URL: special-case owner.github.io
+          if [ "$REPO_NAME" = "${OWNER}.github.io" ]; then
+            PAGES_URL="https://${OWNER}.github.io/"
+          else
+            PAGES_URL="https://${OWNER}.github.io/${REPO_NAME}/"
+          fi
 
           # Minimal Pandoc template (no default CSS)
           cat > pandoc_template.html <<'TPL'
@@ -96,8 +109,6 @@ jobs:
             GENERATED=1
           fi
 
-          HOMELINK="https://democracy-lab.github.io/"
-
           # Styles: grid layout + "full-height" painted sidebar column
           CSS='<style>
           html, body { width:100%; max-width:none; margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; color:#222; }
@@ -105,19 +116,17 @@ jobs:
           pre code { display:block; padding:.75em; background:#f6f8fa; border-radius:6px; font-size:90%; overflow:auto; }
           code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
-          /* Page uses CSS Grid; paint the left column so the sidebar appears full-height */
           .page {
             display: grid;
             grid-template-columns: 220px 1fr;
             min-height: 100vh;
             background: linear-gradient(to right, #f4f4f4 0, #f4f4f4 220px, transparent 220px);
           }
-
           .sidebar {
             padding: 20px;
             position: sticky;
             top: 0;
-            height: 100vh;       /* sidebar content scrolls independently if long */
+            height: 100vh;
             overflow: auto;
           }
           .sidebar a { display:block; margin-bottom:10px; color:#0366d6; text-decoration:none; font-weight:600; }
@@ -125,8 +134,6 @@ jobs:
 
           .content { width: 100%; }
           .container { width:100%; max-width: 1400px; margin: 0 auto; padding: 48px; }
-
-          /* Extras block spacing */
           .extras { margin-top: 48px; }
           .extras h2, .extras h3 { margin-top: 1.2em; }
 
@@ -149,6 +156,9 @@ jobs:
             mv "$TMP" index.html
           fi
 
+          # === Use dynamic Pages URL for the sidebar "Home" link ===
+          HOMELINK="$PAGES_URL"
+
           # Wrap body with grid + sidebar + content container (idempotent)
           if grep -qi '<div class="page"' index.html; then
             echo "Wrapper already present; skipping."
@@ -165,6 +175,17 @@ jobs:
             # Close container/main/page before </body>
             awk 'BEGIN{IGNORECASE=1} { sub(/<\/body>/, "</div></main></div></body>"); print }' index.html > index.html.tmp && mv index.html.tmp index.html
           fi
+
+          # === Replace placeholders anywhere in the page ===
+          esc() { printf '%s' "$1" | sed 's/[&/\\]/\\&/g'; }
+          REPO_URL_ESC=$(esc "$REPO_URL")
+          PAGES_URL_ESC=$(esc "$PAGES_URL")
+
+          sed -i \
+            -e "s/GITHUB_REPO_URL/${REPO_URL_ESC}/g" \
+            -e "s/GITHUB_REPO/${REPO_URL_ESC}/g" \
+            -e "s/GITHUB_PAGES_URL/${PAGES_URL_ESC}/g" \
+            index.html
 
           echo "generated=$GENERATED" >> "$GITHUB_OUTPUT"
 
@@ -238,7 +259,7 @@ jobs:
           )
 
           EXTRAS=${EXTRAS/__CITATION_WRITTEN__/$citation_written}
-          EXTRAS=${EXTRAS/__BIBTEX__/$(printf "%s" "$bibtex" | sed 's/[&/\]/\\&/g')}
+          EXTRAS=${EXTRAS/__BIBTEX__/$(printf "%s" "$bibtex" | sed 's/[&/\\]/\\&/g')}
           EXTRAS=${EXTRAS/__REPO_NAME__/$REPO_NAME}
           EXTRAS=${EXTRAS/__REPO_URL__/$REPO_URL}
           EXTRAS=${EXTRAS/__LAST_UPDATE__/$LAST_UPDATE}
@@ -268,5 +289,10 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Show deployed Pages URL in summary
+        run: |
+          echo "### Deployed Pages URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"
 
 
