@@ -162,7 +162,7 @@ jobs:
           fi
 
           # === Use dynamic Pages URL for the sidebar "Home" link ===
-          HOMELINK="$PAGES_URL"
+          HOMELINK="https://democracy-lab.github.io/"
 
           # Wrap body with grid + sidebar + content container (idempotent)
           if grep -qi '<div class="page"' index.html; then
