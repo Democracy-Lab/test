@@ -178,12 +178,18 @@ jobs:
           fi
 
           # === Extract Pandoc TOC and move it into the sidebar ===
-          # Grab inner HTML of <nav id="TOC"> ... </nav>
-          TOC_INNER=$(perl -0777 -ne 'if (m|<nav\s+id="TOC"[^>]*>(.*?)</nav>|si){print $1}' index.html || true)
+          # Try several known selectors for Pandoc's TOC output
+          TOC_INNER=$(perl -0777 -ne 'if (m|<(nav|div)\s+[^>]*(id="TOC"|role="doc-toc")[^>]*>(.*?)</\1>|si){print $3} elsif (m|<nav\s+id="TOC"[^>]*>(.*?)</nav>|si){print $1} elsif (m|<nav\s+role="doc-toc"[^>]*>(.*?)</nav>|si){print $1}' index.html || true)
 
-          # If a TOC exists, clean it and inject; then remove original TOC
+          # Count how many README headings will be eligible (for diagnostics)
+          if [ -f README.md ]; then
+            HCOUNT=$(grep -E '^\s{0,3}#{1,6}\s' README.md | wc -l | tr -d ' ')
+          else
+            HCOUNT=0
+          fi
+
           if [ -n "$TOC_INNER" ]; then
-            # Remove any <h2>Contents</h2> title inside the nav
+            # Remove any heading labels inside the toc block
             TOC_CLEAN=$(printf "%s" "$TOC_INNER" | perl -0777 -pe 's|<h[1-6][^>]*>.*?</h[1-6]>||si')
 
             # Inject into sidebar: prefer placeholder; otherwise replace nav.toc contents
@@ -195,10 +201,29 @@ jobs:
               perl -0777 -pe 's|(<nav\s+class="toc"[^>]*>).*?(</nav>)|$1'"$TOC_CLEAN"'$2|si' -i index.html
             fi
 
-            # Remove original nav#TOC from main content if it exists
-            perl -0777 -pe 's|<nav\s+id="TOC"[^>]*>.*?</nav>||si' -i index.html
+            # Remove original TOC from main content if it exists
+            perl -0777 -pe 's|<(nav|div)\s+(id="TOC"|role="doc-toc")[^>]*>.*?</\1>||si' -i index.html
+
+            echo "TOC extracted and injected; README headings: $HCOUNT"
+            {
+              echo "### Sidebar TOC status"
+              echo ""
+              echo "- README headings detected: $HCOUNT"
+              echo "- TOC injected into sidebar ✅"
+            } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "No TOC found; leaving sidebar placeholder empty."
+            {
+              echo "### Sidebar TOC status"
+              echo ""
+              echo "- README headings detected: $HCOUNT"
+              echo "- Pandoc TOC not found in built HTML ❌"
+              echo ""
+              echo "Hints:"
+              echo "1) Ensure your README uses Markdown ATX headings like: #, ##, ###"
+              echo "2) Headings inside HTML blocks or code fences are ignored"
+              echo "3) Confirm this job installed Pandoc and used --toc --toc-depth=6"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
           # Replace any placeholders, just in case
@@ -314,3 +339,4 @@ jobs:
         run: |
           echo "### Deployed Pages URL" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"
+
