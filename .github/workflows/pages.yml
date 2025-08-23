@@ -92,22 +92,6 @@ jobs:
           </html>
           TPL
 
-          if [ -f index.html ]; then
-            echo "Keeping existing index.html (not regenerating)."
-          elif [ -f README.md ]; then
-            echo "Generating index.html from README.md with a TOC..."
-            pandoc README.md -f markdown -t html -s \
-              --template=pandoc_template.html \
-              -o index.html \
-              --metadata title="$REPO_HTML_TITLE" \
-              --toc --toc-depth=6 -V toc-title=""
-            GENERATED=1
-          else
-            echo "No index.html or README.md found; writing minimal page."
-            printf '%s\n' '<!doctype html><html><head><meta charset="utf-8"><title>Site</title></head><body>' '<h1>Site</h1>' '<p>No README.md found. Add one and push to regenerate this page.</p>' '</body></html>' > index.html
-            GENERATED=1
-          fi
-
           # Styles (grid layout + sidebar + nice TOC)
           CSS='<style>
           html, body { width:100%; max-width:none; margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; color:#222; }
@@ -125,7 +109,6 @@ jobs:
           .sidebar nav.toc li { margin:4px 0; }
           .sidebar nav.toc a { color:#24292f; text-decoration:none; }
           .sidebar nav.toc a:hover { text-decoration:underline; }
-          .sidebar nav.toc ul ul { padding-left:14px; border-left:2px solid #e5e7eb; margin-left:6px; }
 
           /* TOC indentation rules */
           .sidebar nav.toc ul ul { padding-left:14px; border-left:2px solid #e5e7eb; margin-left:6px; }
@@ -144,6 +127,22 @@ jobs:
             .container { max-width:100%; margin:0; padding:24px; }
           }
           </style>'
+
+          # Always rebuild index.html from README.md
+          if [ -f README.md ]; then
+            echo "Generating index.html from README.md with a TOC..."
+            rm -f index.html
+            pandoc README.md -f markdown -t html -s \
+              --template=pandoc_template.html \
+              -o index.html \
+              --metadata title="$REPO_HTML_TITLE" \
+              --toc --toc-depth=6 -V toc-title=""
+            GENERATED=1
+          else
+            echo "No README.md found; writing minimal page."
+            printf '%s\n' '<!doctype html><html><head><meta charset="utf-8"><title>Site</title></head><body>' '<h1>Site</h1>' '<p>No README.md found. Add one and push to regenerate this page.</p>' '</body></html>' > index.html
+            GENERATED=1
+          fi
 
           # Inject CSS into <head>
           if grep -qi '</head>' index.html; then
@@ -186,10 +185,17 @@ jobs:
           if [ -n "$TOC_INNER" ]; then
             # Remove any <h2>Contents</h2> title inside the nav
             TOC_CLEAN=$(printf "%s" "$TOC_INNER" | perl -0777 -pe 's|<h[1-6][^>]*>.*?</h[1-6]>||si')
-            # Inject into sidebar placeholder
-            awk -v block="$TOC_CLEAN" 'BEGIN{IGNORECASE=1}
-              { sub(/<!--SIDEBAR_LINKS-->/, block); print }' index.html > index.html.tmp && mv index.html.tmp index.html
-            # Remove original nav#TOC from main content
+
+            # Inject into sidebar: prefer placeholder; otherwise replace nav.toc contents
+            if grep -q "<!--SIDEBAR_LINKS-->" index.html; then
+              awk -v block="$TOC_CLEAN" 'BEGIN{IGNORECASE=1}
+                { sub(/<!--SIDEBAR_LINKS-->/, block); print }' index.html > index.html.tmp && mv index.html.tmp index.html
+            else
+              # Replace whatever is inside <nav class="toc">...</nav> with the fresh TOC
+              perl -0777 -pe 's|(<nav\s+class="toc"[^>]*>).*?(</nav>)|$1'"$TOC_CLEAN"'$2|si' -i index.html
+            fi
+
+            # Remove original nav#TOC from main content if it exists
             perl -0777 -pe 's|<nav\s+id="TOC"[^>]*>.*?</nav>||si' -i index.html
           else
             echo "No TOC found; leaving sidebar placeholder empty."
