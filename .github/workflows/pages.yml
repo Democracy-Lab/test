@@ -100,7 +100,7 @@ jobs:
               --template=pandoc_template.html \
               -o index.html \
               --metadata title="$REPO_HTML_TITLE" \
-              --toc --toc-depth=3 -V toc-title=""
+              --toc --toc-depth=6 -V toc-title=""
             GENERATED=1
           else
             echo "No index.html or README.md found; writing minimal page."
@@ -126,6 +126,11 @@ jobs:
           .sidebar nav.toc a { color:#24292f; text-decoration:none; }
           .sidebar nav.toc a:hover { text-decoration:underline; }
           .sidebar nav.toc ul ul { padding-left:14px; border-left:2px solid #e5e7eb; margin-left:6px; }
+
+          /* TOC indentation rules */
+          .sidebar nav.toc ul ul { padding-left:14px; border-left:2px solid #e5e7eb; margin-left:6px; }
+          .sidebar nav.toc ul ul ul { padding-left:14px; margin-left:6px; }
+          .sidebar nav.toc ul ul ul ul { padding-left:14px; margin-left:6px; }
 
           .content { width:100%; }
           .container { width:100%; max-width: 1400px; margin:0 auto; padding:48px; }
