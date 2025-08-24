@@ -71,7 +71,7 @@ jobs:
             PAGES_URL="https://${OWNER}.github.io/${REPO_NAME}/"
           fi
 
-          # Minimal Pandoc template
+          # Minimal Pandoc template (now includes $toc$)
           cat > pandoc_template.html <<'TPL'
           <!doctype html>
           <html>
@@ -84,6 +84,7 @@ jobs:
           $for(include-before)$
           $include-before$
           $endfor$
+          $toc$
           $body$
           $for(include-after)$
           $include-after$
