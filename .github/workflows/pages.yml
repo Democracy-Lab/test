@@ -71,7 +71,7 @@ jobs:
             PAGES_URL="https://${OWNER}.github.io/${REPO_NAME}/"
           fi
 
-          # Minimal Pandoc template — CORRECT TOC PLACEHOLDER
+          # Minimal Pandoc template (no reliance on built-in TOC)
           cat > pandoc_template.html <<'TPL'
           <!doctype html>
           <html>
@@ -84,15 +84,7 @@ jobs:
           $for(include-before)$
           $include-before$
           $endfor$
-
-          $if(toc)$
-          <nav id="TOC" role="doc-toc">
-          $table-of-contents$
-          </nav>
-          $endif$
-
           $body$
-
           $for(include-after)$
           $include-after$
           $endfor$
@@ -136,15 +128,14 @@ jobs:
           }
           </style>'
 
-          # Always rebuild index.html from README.md
+          # Build index.html from README.md
           if [ -f README.md ]; then
-            echo "Generating index.html from README.md with a TOC..."
+            echo "Generating index.html from README.md..."
             rm -f index.html
             pandoc README.md -f gfm+yaml_metadata_block -t html -s \
               --template=pandoc_template.html \
               -o index.html \
-              --metadata title="$REPO_HTML_TITLE" \
-              --toc --toc-depth=6 -V toc-title=""
+              --metadata title="$REPO_HTML_TITLE"
             GENERATED=1
           else
             echo "No README.md found; writing minimal page."
@@ -164,7 +155,7 @@ jobs:
             mv "$TMP" index.html
           fi
 
-          # === Sidebar with Home + placeholder for TOC links ===
+          # === Sidebar wrapper with Home + placeholder for TOC links ===
           HOMELINK="https://democracy-lab.github.io/"
           if grep -qi '<div class="page"' index.html; then
             echo "Wrapper already present; skipping."
@@ -185,12 +176,30 @@ jobs:
             awk 'BEGIN{IGNORECASE=1} { sub(/<\/body>/, "</div></main></div></body>"); print }' index.html > index.html.tmp && mv index.html.tmp index.html
           fi
 
-          # >>> DEBUG: check for TOC before extraction <<<
-          echo "DEBUG: Checking for TOC presence before extraction..."
-          grep -niE '<nav[^>]+(id="TOC"|role="doc-toc"|class="[^"]*toc[^"]*")' index.html || echo "TOC not found pre-extraction"
-
-          # === Extract Pandoc TOC and move it into the sidebar ===
-          TOC_INNER=$(perl -0777 -ne 'if (m|<(nav|div)\s+[^>]*(id="TOC"|role="doc-toc")[^>]*>(.*?)</\1>|si){print $3} elsif (m|<nav\s+id="TOC"[^>]*>(.*?)</nav>|si){print $1} elsif (m|<nav\s+role="doc-toc"[^>]*>(.*?)</nav>|si){print $1}' index.html || true)
+          # === Build a TOC by parsing headings already in index.html ===
+          # We look for <h1..h6 id="...">Title</hN>, strip any inline tags, and nest <ul> by level.
+          TOC_BUILT=$(perl -0777 -ne '
+            my @H;
+            while (m|<h([1-6])\s+[^>]*id="([^"]+)"[^>]*>(.*?)</h\1>|sig) {
+              my ($lvl,$id,$raw) = ($1,$2,$3);
+              $raw =~ s/<[^>]+>//g;           # strip tags
+              $raw =~ s/\s+/ /g; $raw =~ s/^\s+|\s+$//g;
+              push @H, [$lvl,$id,$raw] if length $raw;
+            }
+            if (!@H) { exit 0 }
+            my $html = "";
+            my $prev = 0;
+            for my $r (@H) {
+              my ($l,$id,$t) = @$r;
+              if ($prev==0) { $html .= "<ul>\n"; $prev=$l; }
+              while ($l > $prev) { $html .= "<ul>\n"; $prev++ }
+              while ($l < $prev) { $html .= "</ul>\n"; $prev-- }
+              $html .= qq{<li><a href="#$id">$t</a></li>\n};
+            }
+            while ($prev-- > 1) { $html .= "</ul>\n"; }
+            $html .= "</ul>\n";
+            print $html;
+          ' index.html || true)
 
           # Count README headings (diagnostics)
           if [ -f README.md ]; then
@@ -199,37 +208,33 @@ jobs:
             HCOUNT=0
           fi
 
-          if [ -n "$TOC_INNER" ]; then
-            TOC_CLEAN=$(printf "%s" "$TOC_INNER" | perl -0777 -pe 's|<h[1-6][^>]*>.*?</h[1-6]>||si')
-
+          if [ -n "$TOC_BUILT" ]; then
+            # Inject into sidebar
             if grep -q "<!--SIDEBAR_LINKS-->" index.html; then
-              awk -v block="$TOC_CLEAN" 'BEGIN{IGNORECASE=1}
+              awk -v block="$TOC_BUILT" 'BEGIN{IGNORECASE=1}
                 { sub(/<!--SIDEBAR_LINKS-->/, block); print }' index.html > index.html.tmp && mv index.html.tmp index.html
             else
-              perl -0777 -pe 's|(<nav\s+class="toc"[^>]*>).*?(</nav>)|$1'"$TOC_CLEAN"'$2|si' -i index.html
+              perl -0777 -pe 's|(<nav\s+class="toc"[^>]*>).*?(</nav>)|$1'"$TOC_BUILT"'$2|si' -i index.html
             fi
 
-            perl -0777 -pe 's|<(nav|div)\s+(id="TOC"|role="doc-toc")[^>]*>.*?</\1>||si' -i index.html
-
-            echo "TOC extracted and injected; README headings: $HCOUNT"
+            echo "Sidebar TOC built from headings; README headings: $HCOUNT"
             {
               echo "### Sidebar TOC status"
               echo ""
               echo "- README headings detected: $HCOUNT"
-              echo "- TOC injected into sidebar ✅"
+              echo "- Sidebar TOC built from headings ✅"
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "No TOC found; leaving sidebar placeholder empty."
+            echo "No headings parsed; leaving sidebar placeholder empty."
             {
               echo "### Sidebar TOC status"
               echo ""
               echo "- README headings detected: $HCOUNT"
-              echo "- Pandoc TOC not found in built HTML ❌"
+              echo "- Could not parse headings from built HTML ❌"
               echo ""
               echo "Hints:"
-              echo "1) Ensure your README uses Markdown ATX headings like: #, ##, ###"
-              echo "2) Headings inside HTML blocks or code fences are ignored"
-              echo "3) Confirm this job installed Pandoc and used --toc --toc-depth=6"
+              echo "1) Ensure headings are not inside code fences or raw HTML blocks"
+              echo "2) Confirm Pandoc produced <h1..h6 id=\"...\"> elements"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -252,6 +257,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           set -e
+
           REPO_NAME="${REPO#*/}"
           REPO_URL="https://github.com/$REPO"
           if [ "$REPO_NAME" = "${OWNER}.github.io" ]; then
@@ -345,5 +351,6 @@ jobs:
         run: |
           echo "### Deployed Pages URL" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"
+
 
 
