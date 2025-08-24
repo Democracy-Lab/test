@@ -177,6 +177,10 @@ jobs:
             awk 'BEGIN{IGNORECASE=1} { sub(/<\/body>/, "</div></main></div></body>"); print }' index.html > index.html.tmp && mv index.html.tmp index.html
           fi
 
+          # >>> DEBUG: check for TOC before extraction <<<
+          echo "DEBUG: Checking for TOC presence before extraction..."
+          grep -niE '<nav[^>]+(id="TOC"|role="doc-toc"|class="[^"]*toc[^"]*")' index.html || echo "TOC not found pre-extraction"
+
           # === Extract Pandoc TOC and move it into the sidebar ===
           # Try several known selectors for Pandoc's TOC output
           TOC_INNER=$(perl -0777 -ne 'if (m|<(nav|div)\s+[^>]*(id="TOC"|role="doc-toc")[^>]*>(.*?)</\1>|si){print $3} elsif (m|<nav\s+id="TOC"[^>]*>(.*?)</nav>|si){print $1} elsif (m|<nav\s+role="doc-toc"[^>]*>(.*?)</nav>|si){print $1}' index.html || true)
@@ -339,4 +343,5 @@ jobs:
         run: |
           echo "### Deployed Pages URL" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"
+
 
