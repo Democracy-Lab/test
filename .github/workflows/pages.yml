@@ -71,7 +71,7 @@ jobs:
             PAGES_URL="https://${OWNER}.github.io/${REPO_NAME}/"
           fi
 
-          # Minimal Pandoc template (now includes $toc$)
+          # Minimal Pandoc template — CORRECT TOC PLACEHOLDER
           cat > pandoc_template.html <<'TPL'
           <!doctype html>
           <html>
@@ -84,8 +84,15 @@ jobs:
           $for(include-before)$
           $include-before$
           $endfor$
-          $toc$
+
+          $if(toc)$
+          <nav id="TOC" role="doc-toc">
+          $table-of-contents$
+          </nav>
+          $endif$
+
           $body$
+
           $for(include-after)$
           $include-after$
           $endfor$
@@ -133,7 +140,7 @@ jobs:
           if [ -f README.md ]; then
             echo "Generating index.html from README.md with a TOC..."
             rm -f index.html
-            pandoc README.md -f markdown -t html -s \
+            pandoc README.md -f gfm+yaml_metadata_block -t html -s \
               --template=pandoc_template.html \
               -o index.html \
               --metadata title="$REPO_HTML_TITLE" \
@@ -183,10 +190,9 @@ jobs:
           grep -niE '<nav[^>]+(id="TOC"|role="doc-toc"|class="[^"]*toc[^"]*")' index.html || echo "TOC not found pre-extraction"
 
           # === Extract Pandoc TOC and move it into the sidebar ===
-          # Try several known selectors for Pandoc's TOC output
           TOC_INNER=$(perl -0777 -ne 'if (m|<(nav|div)\s+[^>]*(id="TOC"|role="doc-toc")[^>]*>(.*?)</\1>|si){print $3} elsif (m|<nav\s+id="TOC"[^>]*>(.*?)</nav>|si){print $1} elsif (m|<nav\s+role="doc-toc"[^>]*>(.*?)</nav>|si){print $1}' index.html || true)
 
-          # Count how many README headings will be eligible (for diagnostics)
+          # Count README headings (diagnostics)
           if [ -f README.md ]; then
             HCOUNT=$(grep -E '^\s{0,3}#{1,6}\s' README.md | wc -l | tr -d ' ')
           else
@@ -194,19 +200,15 @@ jobs:
           fi
 
           if [ -n "$TOC_INNER" ]; then
-            # Remove any heading labels inside the toc block
             TOC_CLEAN=$(printf "%s" "$TOC_INNER" | perl -0777 -pe 's|<h[1-6][^>]*>.*?</h[1-6]>||si')
 
-            # Inject into sidebar: prefer placeholder; otherwise replace nav.toc contents
             if grep -q "<!--SIDEBAR_LINKS-->" index.html; then
               awk -v block="$TOC_CLEAN" 'BEGIN{IGNORECASE=1}
                 { sub(/<!--SIDEBAR_LINKS-->/, block); print }' index.html > index.html.tmp && mv index.html.tmp index.html
             else
-              # Replace whatever is inside <nav class="toc">...</nav> with the fresh TOC
               perl -0777 -pe 's|(<nav\s+class="toc"[^>]*>).*?(</nav>)|$1'"$TOC_CLEAN"'$2|si' -i index.html
             fi
 
-            # Remove original TOC from main content if it exists
             perl -0777 -pe 's|<(nav|div)\s+(id="TOC"|role="doc-toc")[^>]*>.*?</\1>||si' -i index.html
 
             echo "TOC extracted and injected; README headings: $HCOUNT"
@@ -250,7 +252,6 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           set -e
-
           REPO_NAME="${REPO#*/}"
           REPO_URL="https://github.com/$REPO"
           if [ "$REPO_NAME" = "${OWNER}.github.io" ]; then
