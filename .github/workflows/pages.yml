@@ -94,7 +94,7 @@ jobs:
 
           # Styles (grid layout + sidebar + nice TOC)
           CSS='<style>
-          html, body { width:100%; max-width:none; margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; color:#222; }
+          html, body { width:100%; max-width:none; margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; color:#222; line-height: 1.5; }
           h1, h2, h3, h4, h5, h6 { font-family: Arial, Helvetica, sans-serif; }
           pre code { display:block; padding:.75em; background:#f6f8fa; border-radius:6px; font-size:90%; overflow:auto; }
           code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
@@ -109,6 +109,7 @@ jobs:
           .sidebar nav.toc li { margin:4px 0; }
           .sidebar nav.toc a { color:#24292f; text-decoration:none; }
           .sidebar nav.toc a:hover { text-decoration:underline; }
+          .sidebar .nav-label { margin-top: 1em; margin-bottom: .5em; font-size: 15px; color: #444; }
 
           /* TOC indentation rules */
           .sidebar nav.toc ul ul { padding-left:14px; border-left:2px solid #e5e7eb; margin-left:6px; }
@@ -116,7 +117,7 @@ jobs:
           .sidebar nav.toc ul ul ul ul { padding-left:14px; margin-left:6px; }
 
           .content { width:100%; }
-          .container { width:100%; max-width: 1000px; margin:0 auto; padding:48px; }
+          .container { width:100%; max-width: 900px; margin:0 auto; padding:48px; }
 
           .extras { margin-top: 48px; }
           .extras h2, .extras h3 { margin-top: 1.2em; }
@@ -155,10 +156,14 @@ jobs:
             mv "$TMP" index.html
           fi
 
-          # === Sidebar wrapper with Home + placeholder for TOC links ===
+          # === Sidebar wrapper with Home + Navigation label + placeholder for TOC links ===
           HOMELINK="https://democracy-lab.github.io/"
           if grep -qi '<div class="page"' index.html; then
-            echo "Wrapper already present; skipping."
+            echo "Wrapper already present; ensuring Navigation label exists."
+            # If the label is missing, insert it immediately before <nav class="toc">
+            if ! grep -qi '<h3[^>]*class="[^"]*nav-label[^"]*"' index.html; then
+              perl -0777 -pe 's|(<aside\s+class="sidebar"[^>]*>\s*(?:(?!</aside>).)*?<a\s+class="home"[^>]*>.*?</a>\s*)(<nav\s+class="toc")|$1<h3 class="nav-label">Navigation:</h3>\n<$2|si' -i index.html
+            fi
           else
             awk -v home="$HOMELINK" 'BEGIN{IGNORECASE=1}
               {
@@ -166,6 +171,7 @@ jobs:
                   sub(/<body[^>]*>/,
                       "&\n<div class=\"page\"><aside class=\"sidebar\">" \
                       "<a class=\"home\" href=\"" home "\" aria-label=\"Go to home\">← Home</a>" \
+                      "<h3 class=\"nav-label\">Navigation:</h3>" \
                       "<nav class=\"toc\"><!--SIDEBAR_LINKS--></nav>" \
                       "</aside>\n<main class=\"content\"><div class=\"container\">");
                   done=1
@@ -351,6 +357,7 @@ jobs:
         run: |
           echo "### Deployed Pages URL" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"
+
 
 
 
